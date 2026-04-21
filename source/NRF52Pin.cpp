@@ -23,10 +23,10 @@ DEALINGS IN THE SOFTWARE.
 */
 
 /**
-  * Class definition for Pin.
-  *
-  * Commonly represents an I/O pin on the edge connector.
-  */
+ * Class definition for Pin.
+ *
+ * Commonly represents an I/O pin on the edge connector.
+ */
 #include "NRF52Pin.h"
 #include "Button.h"
 #include "PulseIn.h"
@@ -36,7 +36,7 @@ DEALINGS IN THE SOFTWARE.
 #include "EventModel.h"
 #include "codal_target_hal.h"
 #include "NotifyEvents.h"
-
+#include "intercept.h"
 
 using namespace codal;
 
@@ -52,112 +52,114 @@ using namespace codal;
 
 static NRF52Pin *irq_pins[NUM_PINS];
 
-MemorySource* NRF52Pin::pwmSource = NULL;
-NRF52PWM* NRF52Pin::pwm = NULL;
-uint16_t NRF52Pin::pwmBuffer[NRF52PIN_PWM_CHANNEL_MAP_SIZE] = {0,0,0,0};
-int8_t NRF52Pin::pwmChannelMap[NRF52PIN_PWM_CHANNEL_MAP_SIZE] = {-1,-1,-1,-1};
+MemorySource *NRF52Pin::pwmSource = NULL;
+NRF52PWM *NRF52Pin::pwm = NULL;
+uint16_t NRF52Pin::pwmBuffer[NRF52PIN_PWM_CHANNEL_MAP_SIZE] = {0, 0, 0, 0};
+int8_t NRF52Pin::pwmChannelMap[NRF52PIN_PWM_CHANNEL_MAP_SIZE] = {-1, -1, -1, -1};
 uint8_t NRF52Pin::lastUsedChannel = 3;
 
-NRF52ADC* NRF52Pin::adc = NULL;
-TouchSensor* NRF52Pin::touchSensor = NULL;
+NRF52ADC *NRF52Pin::adc = NULL;
+TouchSensor *NRF52Pin::touchSensor = NULL;
+
+void (*gpio_write_hook)(int pinNumber, int value) = NULL;
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-static void process_gpio_irq(NRF_GPIO_Type* GPIO_PORT, int pinNumberOffset)
-{
-    uint32_t    pinNumber;
-    uint32_t    latch;
-    NRF52Pin    *pin;
-
-    // Take a snapshot of the latched values.
-    latch = GPIO_PORT->LATCH;
-
-    // Handle any events raised on this port.
-    while(latch)
+    static void process_gpio_irq(NRF_GPIO_Type *GPIO_PORT, int pinNumberOffset)
     {
-        // Determine the most significant pin that has changed.
-        asm("mov r11, #31              \r\n"
-            "clz r12, %[value]         \r\n"
-            "sub %[result], r11, r12   \r\n"
+        uint32_t pinNumber;
+        uint32_t latch;
+        NRF52Pin *pin;
 
-                : [result] "=r" (pinNumber)
-                : [value] "r" (latch)
-                : "r11", "r12", "cc"
-        );
+        // Take a snapshot of the latched values.
+        latch = GPIO_PORT->LATCH;
 
-        // Record that we have received this change event
-        latch &= ~(1 << pinNumber);
-
-        // Determine the NRF52Pin associated with this IRQ event
-        pin = irq_pins[pinNumber + pinNumberOffset];
-
-        // If that pin is registered for edge events
-        if (pin)
+        // Handle any events raised on this port.
+        while (latch)
         {
-            if ( pin->status & (IO_STATUS_EVENT_ON_EDGE | IO_STATUS_EVENT_PULSE_ON_EDGE | IO_STATUS_INTERRUPT_ON_EDGE))
-            {
-                // Flip the sense bit of this pin to the opposite polarity (to sense the next edge)
-                GPIO_PORT->PIN_CNF[pinNumber] ^= 0x00010000;
+            // Determine the most significant pin that has changed.
+            asm("mov r11, #31              \r\n"
+                "clz r12, %[value]         \r\n"
+                "sub %[result], r11, r12   \r\n"
 
-                // Invoke rise/fall handler in the pin according to the sensed polarity of this event
-                if (GPIO_PORT->PIN_CNF[pinNumber] & 0x00010000)
-                    pin->rise();
-                else
-                    pin->fall();
-            }
+                : [result] "=r"(pinNumber)
+                : [value] "r"(latch)
+                : "r11", "r12", "cc");
 
-            if ( pin->isWakeOnActive())
+            // Record that we have received this change event
+            latch &= ~(1 << pinNumber);
+
+            // Determine the NRF52Pin associated with this IRQ event
+            pin = irq_pins[pinNumber + pinNumberOffset];
+
+            // If that pin is registered for edge events
+            if (pin)
             {
-                if ( fiber_scheduler_get_deepsleep_pending())
-                    Event(DEVICE_ID_NOTIFY, POWER_EVT_CANCEL_DEEPSLEEP);
+                if (pin->status & (IO_STATUS_EVENT_ON_EDGE | IO_STATUS_EVENT_PULSE_ON_EDGE | IO_STATUS_INTERRUPT_ON_EDGE))
+                {
+                    // Flip the sense bit of this pin to the opposite polarity (to sense the next edge)
+                    GPIO_PORT->PIN_CNF[pinNumber] ^= 0x00010000;
+
+                    // Invoke rise/fall handler in the pin according to the sensed polarity of this event
+                    if (GPIO_PORT->PIN_CNF[pinNumber] & 0x00010000)
+                        pin->rise();
+                    else
+                        pin->fall();
+                }
+
+                if (pin->isWakeOnActive())
+                {
+                    if (fiber_scheduler_get_deepsleep_pending())
+                        Event(DEVICE_ID_NOTIFY, POWER_EVT_CANCEL_DEEPSLEEP);
+                }
             }
         }
+
+        GPIO_PORT->LATCH = 0xffffffff;
     }
 
-    GPIO_PORT->LATCH = 0xffffffff;
-}
-
-void GPIOTE_IRQHandler(void)
-{
-    if (NRF_GPIOTE->EVENTS_PORT)
+    void GPIOTE_IRQHandler(void)
     {
-        // Acknowledge the interrupt
-        NRF_GPIOTE->EVENTS_PORT = 0;
+        if (NRF_GPIOTE->EVENTS_PORT)
+        {
+            // Acknowledge the interrupt
+            NRF_GPIOTE->EVENTS_PORT = 0;
 
-        process_gpio_irq(NRF_P0, 0);
-        process_gpio_irq(NRF_P1, 32);
+            process_gpio_irq(NRF_P0, 0);
+            process_gpio_irq(NRF_P1, 32);
+        }
     }
-}
 
 #ifdef __cplusplus
 }
 #endif
 
 /**
-  * Constructor.
-  * Create a Pin instance, generally used to represent a pin on the edge connector.
-  *
-  * @param id the unique EventModel id of this component.
-  *
-  * @param name the mbed PinName for this Pin instance.
-  *
-  * @param capability the capabilities this Pin instance should have.
-  *                   (PIN_CAPABILITY_DIGITAL, PIN_CAPABILITY_ANALOG, PIN_CAPABILITY_AD, PIN_CAPABILITY_ALL)
-  *
-  * @code
-  * Pin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_ALL);
-  * @endcode
-  */
+ * Constructor.
+ * Create a Pin instance, generally used to represent a pin on the edge connector.
+ *
+ * @param id the unique EventModel id of this component.
+ *
+ * @param name the mbed PinName for this Pin instance.
+ *
+ * @param capability the capabilities this Pin instance should have.
+ *                   (PIN_CAPABILITY_DIGITAL, PIN_CAPABILITY_ANALOG, PIN_CAPABILITY_AD, PIN_CAPABILITY_ALL)
+ *
+ * @code
+ * Pin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_ALL);
+ * @endcode
+ */
 NRF52Pin::NRF52Pin(int id, PinNumber name, PinCapability capability) : codal::Pin(id, name, capability)
 {
     this->pullMode = DEVICE_DEFAULT_PULLMODE;
     CODAL_ASSERT(name < NUM_PINS, 50);
     irq_pins[name] = this;
 
-    NRF_GPIOTE->INTENSET    = GPIOTE_INTENSET_PORT_Set << GPIOTE_INTENSET_PORT_Pos;
-    NVIC_EnableIRQ  (GPIOTE_IRQn);
+    NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_PORT_Set << GPIOTE_INTENSET_PORT_Pos;
+    NVIC_EnableIRQ(GPIOTE_IRQn);
 }
 
 /**
@@ -170,7 +172,7 @@ void NRF52Pin::connect(PinPeripheral &p, bool deleteOnRelease)
 
     if (obj != &p)
     {
-        if(obj)
+        if (obj)
             disconnect();
 
         Pin::connect(p, deleteOnRelease);
@@ -179,12 +181,12 @@ void NRF52Pin::connect(PinPeripheral &p, bool deleteOnRelease)
 }
 
 /**
-  * Disconnect any attached peripherals from this pin.
-  *
-  * Used only when pin changes mode (i.e. Input/Output/Analog/Digital)
-  *
-  * TODO: Update release code for ADC, PWM, I2C, SPI
-  */
+ * Disconnect any attached peripherals from this pin.
+ *
+ * Used only when pin changes mode (i.e. Input/Output/Analog/Digital)
+ *
+ * TODO: Update release code for ADC, PWM, I2C, SPI
+ */
 void NRF52Pin::disconnect()
 {
     // Avoid any potential recursive loops caused by pin swaps within a single peripheral
@@ -218,21 +220,23 @@ void NRF52Pin::disconnect()
 }
 
 /**
-  * Configures this IO pin as a digital output (if necessary) and sets the pin to 'value'.
-  *
-  * @param value 0 (LO) or 1 (HI)
-  *
-  * @return DEVICE_OK on success, DEVICE_INVALID_PARAMETER if value is out of range, or DEVICE_NOT_SUPPORTED
-  *         if the given pin does not have digital capability.
-  *
-  * @code
-  * Pin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_BOTH);
-  * 
-  * P0.setDigitalValue(1); // P0 is now HI
-  * @endcode
-  */
+ * Configures this IO pin as a digital output (if necessary) and sets the pin to 'value'.
+ *
+ * @param value 0 (LO) or 1 (HI)
+ *
+ * @return DEVICE_OK on success, DEVICE_INVALID_PARAMETER if value is out of range, or DEVICE_NOT_SUPPORTED
+ *         if the given pin does not have digital capability.
+ *
+ * @code
+ * Pin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_BOTH);
+ *
+ * P0.setDigitalValue(1); // P0 is now HI
+ * @endcode
+ */
 int NRF52Pin::setDigitalValue(int value)
 {
+    if (gpio_write_hook)
+        gpio_write_hook(name, value);
     if ((status & IO_STATUS_DIGITAL_OUT) && (!obj || obj->isPinLocked()))
     {
         if (value)
@@ -259,18 +263,18 @@ int NRF52Pin::setDigitalValue(int value)
 }
 
 /**
-  * Configures this IO pin as a digital input (if necessary) and tests its current value.
-  *
-  *
-  * @return 1 if this input is high, 0 if input is LO, or DEVICE_NOT_SUPPORTED
-  *         if the given pin does not have digital capability.
-  *
-  * @code
-  * Pin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_BOTH);
-  * 
-  * P0.getDigitalValue(); // P0 is either 0 or 1;
-  * @endcode
-  */
+ * Configures this IO pin as a digital input (if necessary) and tests its current value.
+ *
+ *
+ * @return 1 if this input is high, 0 if input is LO, or DEVICE_NOT_SUPPORTED
+ *         if the given pin does not have digital capability.
+ *
+ * @code
+ * Pin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_BOTH);
+ *
+ * P0.getDigitalValue(); // P0 is either 0 or 1;
+ * @endcode
+ */
 int NRF52Pin::getDigitalValue()
 {
     // Optimisation: Permit fast changes between digital in and digital out, given its common use case.
@@ -303,7 +307,7 @@ int NRF52Pin::getDigitalValue()
  *
  * @code
  * DevicePin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_BOTH);
- * 
+ *
  * P0.getDigitalValue(); // P0 is either 0 or 1;
  * @endcode
  */
@@ -333,22 +337,22 @@ int NRF52Pin::initialisePWM()
 }
 
 /**
-  * Configures this IO pin as an analog/pwm output, and change the output value to the given level.
-  *
-  * @param value the level to set on the output pin, in the range 0 - 1024
-  *
-  * @return DEVICE_OK on success, DEVICE_INVALID_PARAMETER if value is out of range, or DEVICE_NOT_SUPPORTED
-  *         if the given pin does not have analog capability.
-  */
+ * Configures this IO pin as an analog/pwm output, and change the output value to the given level.
+ *
+ * @param value the level to set on the output pin, in the range 0 - 1024
+ *
+ * @return DEVICE_OK on success, DEVICE_INVALID_PARAMETER if value is out of range, or DEVICE_NOT_SUPPORTED
+ *         if the given pin does not have analog capability.
+ */
 int NRF52Pin::setAnalogValue(int value)
 {
     // //check if this pin has an analogue mode...
-     if(!(PIN_CAPABILITY_ANALOG & capability))
-         return DEVICE_NOT_SUPPORTED;
+    if (!(PIN_CAPABILITY_ANALOG & capability))
+        return DEVICE_NOT_SUPPORTED;
 
     // //sanitise the level value
-    if(value < 0 || value > DEVICE_PIN_MAX_OUTPUT)
-         return DEVICE_INVALID_PARAMETER;
+    if (value < 0 || value > DEVICE_PIN_MAX_OUTPUT)
+        return DEVICE_INVALID_PARAMETER;
 
     if (!(status & IO_STATUS_ANALOG_OUT))
         disconnect();
@@ -376,7 +380,7 @@ int NRF52Pin::setAnalogValue(int value)
         status |= IO_STATUS_ANALOG_OUT;
 
     // set new value
-    pwmBuffer[channel] = (int)((float)pwm->getSampleRange() * (1 - (float)value / (float)(DEVICE_PIN_MAX_OUTPUT+1)));
+    pwmBuffer[channel] = (int)((float)pwm->getSampleRange() * (1 - (float)value / (float)(DEVICE_PIN_MAX_OUTPUT + 1)));
     pwmSource->playAsync(pwmBuffer, NRF52PIN_PWM_CHANNEL_MAP_SIZE * sizeof(uint16_t));
 
     return DEVICE_OK;
@@ -401,24 +405,24 @@ int NRF52Pin::setAnalogValue(int value)
  */
 int NRF52Pin::setServoValue(int value, int range, int center)
 {
-    //check if this pin has an analogue mode...
-    if(!(PIN_CAPABILITY_ANALOG & capability))
+    // check if this pin has an analogue mode...
+    if (!(PIN_CAPABILITY_ANALOG & capability))
         return DEVICE_NOT_SUPPORTED;
 
-    //sanitise the servo level
-    if(value < 0 || range < 1 || center < 1)
+    // sanitise the servo level
+    if (value < 0 || range < 1 || center < 1)
         return DEVICE_INVALID_PARAMETER;
 
-    //clip - just in case
-    if(value > DEVICE_PIN_MAX_SERVO_RANGE)
+    // clip - just in case
+    if (value > DEVICE_PIN_MAX_SERVO_RANGE)
         value = DEVICE_PIN_MAX_SERVO_RANGE;
 
-    //calculate the lower bound based on the midpoint
+    // calculate the lower bound based on the midpoint
     int lower = (center - (range / 2)) * 1000;
 
     value = value * 1000;
 
-    //add the percentage of the range based on the value between 0 and 180
+    // add the percentage of the range based on the value between 0 and 180
     int scaled = lower + (range * (value / DEVICE_PIN_MAX_SERVO_RANGE));
 
     return setServoPulseUs(scaled / 1000);
@@ -432,7 +436,7 @@ int NRF52Pin::setServoValue(int value, int range, int center)
  *
  * @code
  * DevicePin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_BOTH);
- * 
+ *
  * P0.getAnalogValue(); // P0 is a value in the range of 0 - 1024
  * @endcode
  */
@@ -440,7 +444,7 @@ int NRF52Pin::getAnalogValue()
 {
 
     // //check if this pin has an analogue mode...
-    if(!(PIN_CAPABILITY_ANALOG & capability))
+    if (!(PIN_CAPABILITY_ANALOG & capability))
         return DEVICE_NOT_SUPPORTED;
 
     // Move into an analogue input state if necessary.
@@ -464,40 +468,40 @@ int NRF52Pin::getAnalogValue()
 }
 
 /**
-  * Determines if this IO pin is currently configured as an input.
-  *
-  * @return 1 if pin is an analog or digital input, 0 otherwise.
-  */
+ * Determines if this IO pin is currently configured as an input.
+ *
+ * @return 1 if pin is an analog or digital input, 0 otherwise.
+ */
 int NRF52Pin::isInput()
 {
     return (status & (IO_STATUS_DIGITAL_IN | IO_STATUS_ANALOG_IN)) == 0 ? 0 : 1;
 }
 
 /**
-  * Determines if this IO pin is currently configured as an output.
-  *
-  * @return 1 if pin is an analog or digital output, 0 otherwise.
-  */
+ * Determines if this IO pin is currently configured as an output.
+ *
+ * @return 1 if pin is an analog or digital output, 0 otherwise.
+ */
 int NRF52Pin::isOutput()
 {
     return (PORT->DIR & (1 << PIN)) != 0 || (status & (IO_STATUS_DIGITAL_OUT | IO_STATUS_ANALOG_OUT)) != 0;
 }
 
 /**
-  * Determines if this IO pin is currently configured for digital use.
-  *
-  * @return 1 if pin is digital, 0 otherwise.
-  */
+ * Determines if this IO pin is currently configured for digital use.
+ *
+ * @return 1 if pin is digital, 0 otherwise.
+ */
 int NRF52Pin::isDigital()
 {
     return (status & (IO_STATUS_DIGITAL_IN | IO_STATUS_DIGITAL_OUT)) == 0 ? 0 : 1;
 }
 
 /**
-  * Determines if this IO pin is currently configured for analog use.
-  *
-  * @return 1 if pin is analog, 0 otherwise.
-  */
+ * Determines if this IO pin is currently configured for analog use.
+ *
+ * @return 1 if pin is analog, 0 otherwise.
+ */
 int NRF52Pin::isAnalog()
 {
     return (status & (IO_STATUS_ANALOG_IN | IO_STATUS_ANALOG_OUT)) == 0 ? 0 : 1;
@@ -512,21 +516,21 @@ int NRF52Pin::isAnalog()
  * @return 1 if pin is touched, 0 if not, or DEVICE_NOT_SUPPORTED if this pin does not support touch capability.
  *
  * @code
- * 
+ *
  * DeviceMessageBus bus;
  *
  * DevicePin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_ALL);
- * 
+ *
  * if(P0.isTouched())
- * 
+ *
  * {
- * 
+ *
  *     //do something!
- * 
+ *
  * }
  *
  * // subscribe to events generated by this pin!
- * 
+ *
  * bus.listen(DEVICE_ID_IO_P0, DEVICE_BUTTON_EVT_CLICK, someFunction);
  * @endcode
  */
@@ -535,7 +539,6 @@ int NRF52Pin::isTouched()
     // Maintain the last type of sensing used.
     return isTouched(status & IO_STATUS_CAPACITATIVE_TOUCH ? TouchMode::Capacitative : TouchMode::Resistive);
 }
-
 
 /**
  * Configures this IO pin as a "makey makey" style touch sensor (if necessary)
@@ -546,28 +549,28 @@ int NRF52Pin::isTouched()
  * @return 1 if pin is touched, 0 if not, or DEVICE_NOT_SUPPORTED if this pin does not support touch capability.
  *
  * @code
- * 
+ *
  * DeviceMessageBus bus;
  *
  * DevicePin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_ALL);
- * 
+ *
  * if(P0.isTouched())
- * 
+ *
  * {
- * 
+ *
  *    //do something!
- * 
+ *
  * }
  *
  * // subscribe to events generated by this pin!
- * 
+ *
  * bus.listen(DEVICE_ID_IO_P0, DEVICE_BUTTON_EVT_CLICK, someFunction);
  * @endcode
  */
 int NRF52Pin::isTouched(TouchMode touchMode)
 {
-    //check if this pin has a touch mode...
-    if(!(PIN_CAPABILITY_DIGITAL & capability))
+    // check if this pin has a touch mode...
+    if (!(PIN_CAPABILITY_DIGITAL & capability))
         return DEVICE_NOT_SUPPORTED;
 
     // Move into a touch input state if necessary.
@@ -597,10 +600,9 @@ int NRF52Pin::isTouched(TouchMode touchMode)
 
     if (touchMode == TouchMode::Capacitative)
         return ((TouchButton *)obj)->isPressed();
-    
+
     return ((Button *)obj)->isPressed();
 }
-
 
 /**
  * Configures this pin as a "makey makey" style touch sensor (if required) and tests if at any point the pin has
@@ -620,7 +622,6 @@ int NRF52Pin::wasTouched()
     return wasTouched(status & IO_STATUS_CAPACITATIVE_TOUCH ? TouchMode::Capacitative : TouchMode::Resistive);
 }
 
-
 /**
  * Configures this pin as a "makey makey" style touch sensor (if required) and tests if at any point the pin has
  * been touched _since the last time_ this was called.
@@ -637,14 +638,14 @@ int NRF52Pin::wasTouched()
 int NRF52Pin::wasTouched(TouchMode touchMode)
 {
     TouchMode currentTouchMode = (status & IO_STATUS_CAPACITATIVE_TOUCH) ? TouchMode::Capacitative : TouchMode::Resistive;
-    
+
     if ((status & IO_STATUS_TOUCH_IN) == 0 || touchMode != currentTouchMode)
-        if( this->isTouched( touchMode ) == DEVICE_NOT_SUPPORTED )
+        if (this->isTouched(touchMode) == DEVICE_NOT_SUPPORTED)
             return DEVICE_NOT_SUPPORTED;
-    
+
     if (touchMode == TouchMode::Capacitative)
         return ((TouchButton *)obj)->wasPressed();
-    
+
     return ((Button *)obj)->wasPressed();
 }
 
@@ -659,16 +660,15 @@ void NRF52Pin::touchCalibrate()
     }
 }
 
-
 /**
-  * Configures this IO pin as an analog/pwm output if it isn't already, configures the period to be 20ms,
-  * and sets the pulse width, based on the value it is given.
-  *
-  * @param pulseWidth the desired pulse width in microseconds.
-  *
-  * @return DEVICE_OK on success, DEVICE_INVALID_PARAMETER if value is out of range, or DEVICE_NOT_SUPPORTED
-  *         if the given pin does not have analog capability.
-  */
+ * Configures this IO pin as an analog/pwm output if it isn't already, configures the period to be 20ms,
+ * and sets the pulse width, based on the value it is given.
+ *
+ * @param pulseWidth the desired pulse width in microseconds.
+ *
+ * @return DEVICE_OK on success, DEVICE_INVALID_PARAMETER if value is out of range, or DEVICE_NOT_SUPPORTED
+ *         if the given pin does not have analog capability.
+ */
 int NRF52Pin::setServoPulseUs(uint32_t pulseWidth)
 {
     initialisePWM();
@@ -676,16 +676,16 @@ int NRF52Pin::setServoPulseUs(uint32_t pulseWidth)
     if (pwm->getPeriodUs() != 20000)
         pwm->setPeriodUs(20000);
 
-    return setAnalogValue((int) (1024.0f * (float) pulseWidth / 20000.0f));
+    return setAnalogValue((int)(1024.0f * (float)pulseWidth / 20000.0f));
 }
 
 /**
-  * Configures the PWM period of the analog output to the given value.
-  *
-  * @param period The new period for the analog output in microseconds.
-  *
-  * @return DEVICE_OK on success.
-  */
+ * Configures the PWM period of the analog output to the given value.
+ *
+ * @param period The new period for the analog output in microseconds.
+ *
+ * @return DEVICE_OK on success.
+ */
 int NRF52Pin::setAnalogPeriodUs(uint32_t period)
 {
     if (status & IO_STATUS_ANALOG_OUT)
@@ -695,11 +695,11 @@ int NRF52Pin::setAnalogPeriodUs(uint32_t period)
 
         for (int i = 0; i < NRF52PIN_PWM_CHANNEL_MAP_SIZE; i++)
         {
-            float v = (float) pwmBuffer[i];
+            float v = (float)pwmBuffer[i];
             v = v * (float)pwm->getSampleRange();
-            v = v / (float) oldRange;
+            v = v / (float)oldRange;
 
-            pwmBuffer[i] = (uint16_t) v;
+            pwmBuffer[i] = (uint16_t)v;
         }
 
         pwmSource->playAsync(pwmBuffer, NRF52PIN_PWM_CHANNEL_MAP_SIZE * sizeof(uint16_t));
@@ -711,24 +711,24 @@ int NRF52Pin::setAnalogPeriodUs(uint32_t period)
 }
 
 /**
-  * Configures the PWM period of the analog output to the given value.
-  *
-  * @param period The new period for the analog output in milliseconds.
-  *
-  * @return DEVICE_OK on success, or DEVICE_NOT_SUPPORTED if the
-  *         given pin is not configured as an analog output.
-  */
+ * Configures the PWM period of the analog output to the given value.
+ *
+ * @param period The new period for the analog output in milliseconds.
+ *
+ * @return DEVICE_OK on success, or DEVICE_NOT_SUPPORTED if the
+ *         given pin is not configured as an analog output.
+ */
 int NRF52Pin::setAnalogPeriod(int period)
 {
-    return setAnalogPeriodUs(period*1000);
+    return setAnalogPeriodUs(period * 1000);
 }
 
 /**
-  * Obtains the PWM period of the analog output in microseconds.
-  *
-  * @return the period on success, or DEVICE_NOT_SUPPORTED if the
-  *         given pin is not configured as an analog output.
-  */
+ * Obtains the PWM period of the analog output in microseconds.
+ *
+ * @return the period on success, or DEVICE_NOT_SUPPORTED if the
+ *         given pin is not configured as an analog output.
+ */
 uint32_t NRF52Pin::getAnalogPeriodUs()
 {
     if (status & IO_STATUS_ANALOG_OUT)
@@ -738,24 +738,24 @@ uint32_t NRF52Pin::getAnalogPeriodUs()
 }
 
 /**
-  * Obtains the PWM period of the analog output in milliseconds.
-  *
-  * @return the period on success, or DEVICE_NOT_SUPPORTED if the
-  *         given pin is not configured as an analog output.
-  */
+ * Obtains the PWM period of the analog output in milliseconds.
+ *
+ * @return the period on success, or DEVICE_NOT_SUPPORTED if the
+ *         given pin is not configured as an analog output.
+ */
 int NRF52Pin::getAnalogPeriod()
 {
-    return getAnalogPeriodUs()/1000;
+    return getAnalogPeriodUs() / 1000;
 }
 
 /**
-  * Configures the pull of this pin.
-  *
-  * @param pull one of the pull configurations: PullMode::Up, PullMode::Down, or PullMode::None.
-  *
-  * @return DEVICE_NOT_SUPPORTED if the current pin configuration is anything other
-  *         than a digital input, otherwise DEVICE_OK.
-  */
+ * Configures the pull of this pin.
+ *
+ * @param pull one of the pull configurations: PullMode::Up, PullMode::Down, or PullMode::None.
+ *
+ * @return DEVICE_NOT_SUPPORTED if the current pin configuration is anything other
+ *         than a digital input, otherwise DEVICE_OK.
+ */
 int NRF52Pin::setPull(PullMode pull)
 {
     pullMode = pull;
@@ -768,18 +768,17 @@ int NRF52Pin::setPull(PullMode pull)
     if (pull == PullMode::Up)
         s |= 0x0000000c;
 
-
     PORT->PIN_CNF[PIN] = s;
 
     return DEVICE_OK;
 }
 
 /**
-  * This member function manages the calculation of the timestamp of a pulse detected
-  * on a pin whilst in IO_STATUS_EVENT_PULSE_ON_EDGE or IO_STATUS_EVENT_ON_EDGE modes.
-  *
-  * @param eventValue the event value to distribute onto the message bus.
-  */
+ * This member function manages the calculation of the timestamp of a pulse detected
+ * on a pin whilst in IO_STATUS_EVENT_PULSE_ON_EDGE or IO_STATUS_EVENT_ON_EDGE modes.
+ *
+ * @param eventValue the event value to distribute onto the message bus.
+ */
 void NRF52Pin::pulseWidthEvent(uint16_t eventValue)
 {
     Event evt(id, eventValue, CREATE_ONLY);
@@ -801,10 +800,10 @@ void NRF52Pin::pulseWidthEvent(uint16_t eventValue)
 
 void NRF52Pin::rise()
 {
-    if(status & IO_STATUS_EVENT_PULSE_ON_EDGE)
+    if (status & IO_STATUS_EVENT_PULSE_ON_EDGE)
         pulseWidthEvent(DEVICE_PIN_EVT_PULSE_LO);
 
-    if(status & IO_STATUS_EVENT_ON_EDGE)
+    if (status & IO_STATUS_EVENT_ON_EDGE)
         Event(id, DEVICE_PIN_EVT_RISE);
 
     if (status & IO_STATUS_INTERRUPT_ON_EDGE && gpio_irq)
@@ -813,10 +812,10 @@ void NRF52Pin::rise()
 
 void NRF52Pin::fall()
 {
-    if(status & IO_STATUS_EVENT_PULSE_ON_EDGE)
+    if (status & IO_STATUS_EVENT_PULSE_ON_EDGE)
         pulseWidthEvent(DEVICE_PIN_EVT_PULSE_HI);
 
-    if(status & IO_STATUS_EVENT_ON_EDGE)
+    if (status & IO_STATUS_EVENT_ON_EDGE)
         Event(id, DEVICE_PIN_EVT_FALL);
 
     if (status & IO_STATUS_INTERRUPT_ON_EDGE && gpio_irq)
@@ -824,14 +823,14 @@ void NRF52Pin::fall()
 }
 
 /**
-  * This member function will construct an TimedInterruptIn instance, and configure
-  * interrupts for rise and fall.
-  *
-  * @param eventType the specific mode used in interrupt context to determine how an
-  *                  edge/rise is processed.
-  *
-  * @return DEVICE_OK on success
-  */
+ * This member function will construct an TimedInterruptIn instance, and configure
+ * interrupts for rise and fall.
+ *
+ * @param eventType the specific mode used in interrupt context to determine how an
+ *                  edge/rise is processed.
+ *
+ * @return DEVICE_OK on success
+ */
 int NRF52Pin::enableRiseFallEvents(int eventType)
 {
     bool enablePulseIn = false;
@@ -867,11 +866,11 @@ int NRF52Pin::enableRiseFallEvents(int eventType)
     status &= ~(IO_STATUS_EVENT_ON_EDGE | IO_STATUS_EVENT_PULSE_ON_EDGE | IO_STATUS_INTERRUPT_ON_EDGE);
 
     // set our status bits accordingly.
-    if(eventType == DEVICE_PIN_EVENT_ON_EDGE)
+    if (eventType == DEVICE_PIN_EVENT_ON_EDGE)
         status |= IO_STATUS_EVENT_ON_EDGE;
-    else if(eventType == DEVICE_PIN_EVENT_ON_PULSE)
+    else if (eventType == DEVICE_PIN_EVENT_ON_PULSE)
         status |= IO_STATUS_EVENT_PULSE_ON_EDGE;
-    else if(eventType == DEVICE_PIN_INTERRUPT_ON_EDGE)
+    else if (eventType == DEVICE_PIN_INTERRUPT_ON_EDGE)
         status |= IO_STATUS_INTERRUPT_ON_EDGE;
 
     if (enablePulseIn)
@@ -887,11 +886,11 @@ int NRF52Pin::enableRiseFallEvents(int eventType)
 }
 
 /**
-  * If this pin is in a mode where the pin is generating events, it will destruct
-  * the current instance attached to this Pin instance.
-  *
-  * @return DEVICE_OK on success.
-  */
+ * If this pin is in a mode where the pin is generating events, it will destruct
+ * the current instance attached to this Pin instance.
+ *
+ * @return DEVICE_OK on success.
+ */
 int NRF52Pin::disableEvents()
 {
     if (status & (IO_STATUS_EVENT_ON_EDGE | IO_STATUS_EVENT_PULSE_ON_EDGE | IO_STATUS_TOUCH_IN | IO_STATUS_INTERRUPT_ON_EDGE))
@@ -903,11 +902,11 @@ int NRF52Pin::disableEvents()
  * Configures the events generated by this DevicePin instance.
  *
  * DEVICE_PIN_EVENT_ON_EDGE - Configures this pin to a digital input, and generates events whenever a rise/fall is detected on this pin. (DEVICE_PIN_EVT_RISE, DEVICE_PIN_EVT_FALL)
- * 
+ *
  * DEVICE_PIN_EVENT_ON_PULSE - Configures this pin to a digital input, and generates events where the timestamp is the duration that this pin was either HI or LO. (DEVICE_PIN_EVT_PULSE_HI, DEVICE_PIN_EVT_PULSE_LO)
- * 
+ *
  * DEVICE_PIN_EVENT_ON_TOUCH - Configures this pin as a makey makey style touch sensor, in the form of a DeviceButton. Normal button events will be generated using the ID of this pin.
- * 
+ *
  * DEVICE_PIN_EVENT_NONE - Disables events for this pin.
  *
  * @param eventType One of: DEVICE_PIN_EVENT_ON_EDGE, DEVICE_PIN_EVENT_ON_PULSE, DEVICE_PIN_EVENT_ON_TOUCH, DEVICE_PIN_EVENT_NONE
@@ -916,19 +915,19 @@ int NRF52Pin::disableEvents()
  * DeviceMessageBus bus;
  *
  * DevicePin P0(DEVICE_ID_IO_P0, DEVICE_PIN_P0, PIN_CAPABILITY_BOTH);
- * 
+ *
  * P0.eventOn(DEVICE_PIN_EVENT_ON_PULSE);
  *
  * void onPulse(Event evt)
- * 
+ *
  * {
- * 
+ *
  *     int duration = evt.timestamp;
- * 
+ *
  * }
  *
  * bus.listen(DEVICE_ID_IO_P0, DEVICE_PIN_EVT_PULSE_HI, onPulse, MESSAGE_BUS_LISTENER_IMMEDIATE)
- * 
+ *
  * @endcode
  *
  * @return DEVICE_OK on success, or DEVICE_INVALID_PARAMETER if the given eventype does not match
@@ -938,24 +937,24 @@ int NRF52Pin::disableEvents()
  */
 int NRF52Pin::eventOn(int eventType)
 {
-    switch(eventType)
+    switch (eventType)
     {
-        case DEVICE_PIN_INTERRUPT_ON_EDGE:
-        case DEVICE_PIN_EVENT_ON_EDGE:
-        case DEVICE_PIN_EVENT_ON_PULSE:
-            enableRiseFallEvents(eventType);
-            break;
+    case DEVICE_PIN_INTERRUPT_ON_EDGE:
+    case DEVICE_PIN_EVENT_ON_EDGE:
+    case DEVICE_PIN_EVENT_ON_PULSE:
+        enableRiseFallEvents(eventType);
+        break;
 
-        case DEVICE_PIN_EVENT_ON_TOUCH:
-            isTouched();
-            break;
+    case DEVICE_PIN_EVENT_ON_TOUCH:
+        isTouched();
+        break;
 
-        case DEVICE_PIN_EVENT_NONE:
-            disableEvents();
-            break;
+    case DEVICE_PIN_EVENT_NONE:
+        disableEvents();
+        break;
 
-        default:
-            return DEVICE_INVALID_PARAMETER;
+    default:
+        return DEVICE_INVALID_PARAMETER;
     }
 
     return DEVICE_OK;
@@ -970,8 +969,7 @@ int NRF52Pin::eventOn(int eventType)
  * @param timeout The maximum period of time in microseconds to wait for a pulse.
  * @return the period of the pulse in microseconds, or DEVICE_CANCELLED on timeout.
  */
-int
-NRF52Pin::getPulseUs(int timeout)
+int NRF52Pin::getPulseUs(int timeout)
 {
     PulseIn *p;
 
@@ -1038,14 +1036,14 @@ bool NRF52Pin::isHighDrive()
     return (s == 0x00000300);
 }
 
-__attribute__((noinline))
-static void get_and_set(NRF_GPIO_Type *port, uint32_t mask) {
+__attribute__((noinline)) static void get_and_set(NRF_GPIO_Type *port, uint32_t mask)
+{
     // 0 -> 1, only set when IN==0
     port->DIRSET = ~port->IN & mask;
 }
 
-__attribute__((noinline))
-static void get_and_clr(NRF_GPIO_Type *port, uint32_t mask) {
+__attribute__((noinline)) static void get_and_clr(NRF_GPIO_Type *port, uint32_t mask)
+{
     // 1 -> 0, only set when IN==1
     port->DIRSET = port->IN & mask;
 }
@@ -1068,11 +1066,14 @@ int NRF52Pin::getAndSetDigitalValue(int value)
         else
             get_and_clr(PORT, mask);
 
-        if (PORT->DIR & mask) {
+        if (PORT->DIR & mask)
+        {
             disconnect();
             setDigitalValue(value); // make sure 'status' is updated
             return 0;
-        } else {
+        }
+        else
+        {
 
             return DEVICE_BUSY;
         }
