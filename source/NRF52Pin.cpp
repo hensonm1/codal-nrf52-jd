@@ -60,7 +60,7 @@ uint8_t NRF52Pin::lastUsedChannel = 3;
 NRF52ADC *NRF52Pin::adc = NULL;
 TouchSensor *NRF52Pin::touchSensor = NULL;
 
-void (*gpio_write_hook)(int pinNumber, int value) = NULL;
+void (*setDigitalValueIntercept)(int pinNumber, int value) = NULL;
 
 #ifdef __cplusplus
 extern "C"
@@ -234,8 +234,8 @@ void NRF52Pin::disconnect()
  */
 int NRF52Pin::setDigitalValue(int value)
 {
-    if (gpio_write_hook)
-        gpio_write_hook(name, value);
+    if (setDigitalValueIntercept)
+        setDigitalValueIntercept(name, value);
     if ((status & IO_STATUS_DIGITAL_OUT) && (!obj || obj->isPinLocked()))
     {
         if (value)

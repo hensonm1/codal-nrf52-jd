@@ -49,7 +49,7 @@ DEALINGS IN THE SOFTWARE.
 
 extern "C"
 {
-     extern void (*gpio_write_hook)(int pinNumber, int value);
+     extern void (*setDigitalValueIntercept)(int pinNumber, int value);
 }
 
 /**
