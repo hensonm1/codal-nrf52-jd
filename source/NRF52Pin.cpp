@@ -36,7 +36,6 @@ DEALINGS IN THE SOFTWARE.
 #include "EventModel.h"
 #include "codal_target_hal.h"
 #include "NotifyEvents.h"
-#include "intercept.h"
 
 using namespace codal;
 
