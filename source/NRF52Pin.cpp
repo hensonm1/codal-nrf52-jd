@@ -61,6 +61,7 @@ NRF52ADC *NRF52Pin::adc = NULL;
 TouchSensor *NRF52Pin::touchSensor = NULL;
 
 void (*setDigitalValueIntercept)(int pinNumber, int value) = NULL;
+bool (*readDigitalValueIntercept)(int pinNumber, PullMode pull) = NULL;
 
 #ifdef __cplusplus
 extern "C"
@@ -293,6 +294,9 @@ int NRF52Pin::getDigitalValue()
     // Ensure the current pull up/down configuration for this pin is applied.
     setPull(pullMode);
 
+    if (readDigitalValueIntercept)
+        return readDigitalValueIntercept(name, pullMode);
+
     // return the current state of the pin
     return (PORT->IN & (1 << PIN)) ? 1 : 0;
 }
@@ -315,6 +319,7 @@ int NRF52Pin::getDigitalValue(PullMode pull)
     setPull(pull);
     return getDigitalValue();
 }
+
 /**
  * Instantiates the components required for PWM if not previously created
  */

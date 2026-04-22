@@ -50,6 +50,7 @@ DEALINGS IN THE SOFTWARE.
 extern "C"
 {
      extern void (*setDigitalValueIntercept)(int pinNumber, int value);
+     extern bool (*readDigitalValueIntercept)(int pinNumber, PullMode pull);
 }
 
 /**
