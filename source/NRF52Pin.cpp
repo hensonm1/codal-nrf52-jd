@@ -256,16 +256,16 @@ const uint8_t pinMappings[19][2] = {
  */
 int NRF52Pin::setDigitalValue(int value)
 {
-    if (setDigitalValueIntercept)
-        setDigitalValueIntercept(name, value);
     // if (setDigitalValueIntercept)
-    // {
-    //     for (uint8_t i = 0; i < 19; i++)
-    //     {
-    //         if (name == pinMappings[i][0])
-    //             setDigitalValueIntercept(pinMappings[i][1], value);
-    //     }
-    // }
+    // setDigitalValueIntercept(name, value);
+    if (setDigitalValueIntercept)
+    {
+        for (uint8_t i = 0; i < 19; i++)
+        {
+            if (name == pinMappings[i][1])
+                setDigitalValueIntercept(name, value);
+        }
+    }
 
     if ((status & IO_STATUS_DIGITAL_OUT) && (!obj || obj->isPinLocked()))
     {
