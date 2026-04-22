@@ -277,8 +277,37 @@ int NRF52Pin::setDigitalValue(int value)
  */
 int NRF52Pin::getDigitalValue()
 {
-    if (readDigitalValueIntercept && (name != 12))
-        return readDigitalValueIntercept(name, pullMode);
+    const uint8_t pinMappings[19][2] = {
+        {0, 2},
+        {1, 3},
+        {2, 4},
+        {3, 31},
+        {4, 28},
+        {5, 14},
+        {6, 37},
+        {7, 11},
+        {8, 10},
+        {9, 41},
+        {10, 30},
+        {11, 23},
+        {13, 17},
+        {14, 1},
+        {15, 13},
+        {16, 34},
+        {19, 26},
+        {20, 32},
+    };
+
+    // if (readDigitalValueIntercept && (name != 12))
+    //     return readDigitalValueIntercept(name, pullMode);
+    if (readDigitalValueIntercept)
+    {
+        for (uint8_t i = 0; i < 19; i++)
+        {
+            if (name == pinMappings[i][0])
+                return readDigitalValueIntercept(pinMappings[i][1], pullMode);
+        }
+    }
 
     // Optimisation: Permit fast changes between digital in and digital out, given its common use case.
     // we also preserve any interrupt status, pulse measurement events etc.
