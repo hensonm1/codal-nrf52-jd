@@ -219,6 +219,27 @@ void NRF52Pin::disconnect()
     status &= IO_STATUS_MODES;
 }
 
+const uint8_t pinMappings[19][2] = {
+    {0, 2},
+    {1, 3},
+    {2, 4},
+    {3, 31},
+    {4, 28},
+    {5, 14},
+    {6, 37},
+    {7, 11},
+    {8, 10},
+    {9, 41},
+    {10, 30},
+    {11, 23},
+    {13, 17},
+    {14, 1},
+    {15, 13},
+    {16, 34},
+    {19, 26},
+    {20, 32},
+};
+
 /**
  * Configures this IO pin as a digital output (if necessary) and sets the pin to 'value'.
  *
@@ -235,8 +256,17 @@ void NRF52Pin::disconnect()
  */
 int NRF52Pin::setDigitalValue(int value)
 {
+    // if (setDigitalValueIntercept)
+    //     setDigitalValueIntercept(name, value);
     if (setDigitalValueIntercept)
-        setDigitalValueIntercept(name, value);
+    {
+        for (uint8_t i = 0; i < 19; i++)
+        {
+            if (name == pinMappings[i][0])
+                setDigitalValueIntercept(pinMappings[i][1], value);
+        }
+    }
+
     if ((status & IO_STATUS_DIGITAL_OUT) && (!obj || obj->isPinLocked()))
     {
         if (value)
@@ -277,26 +307,6 @@ int NRF52Pin::setDigitalValue(int value)
  */
 int NRF52Pin::getDigitalValue()
 {
-    const uint8_t pinMappings[19][2] = {
-        {0, 2},
-        {1, 3},
-        {2, 4},
-        {3, 31},
-        {4, 28},
-        {5, 14},
-        {6, 37},
-        {7, 11},
-        {8, 10},
-        {9, 41},
-        {10, 30},
-        {11, 23},
-        {13, 17},
-        {14, 1},
-        {15, 13},
-        {16, 34},
-        {19, 26},
-        {20, 32},
-    };
 
     // if (readDigitalValueIntercept && (name != 12))
     //     return readDigitalValueIntercept(name, pullMode);
