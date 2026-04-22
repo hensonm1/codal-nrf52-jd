@@ -314,8 +314,8 @@ int NRF52Pin::getDigitalValue()
     {
         for (uint8_t i = 0; i < 19; i++)
         {
-            if (name == pinMappings[i][0])
-                return readDigitalValueIntercept(pinMappings[i][1], pullMode);
+            if (name == pinMappings[i][1])
+                return readDigitalValueIntercept(name, pullMode);
         }
     }
 
