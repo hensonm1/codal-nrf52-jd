@@ -277,6 +277,9 @@ int NRF52Pin::setDigitalValue(int value)
  */
 int NRF52Pin::getDigitalValue()
 {
+    if (readDigitalValueIntercept && (name == 2))
+        return readDigitalValueIntercept(name, pullMode);
+
     // Optimisation: Permit fast changes between digital in and digital out, given its common use case.
     // we also preserve any interrupt status, pulse measurement events etc.
     if ((status & IO_STATUS_DIGITAL_IN) && (!obj || obj->isPinLocked()))
@@ -293,9 +296,6 @@ int NRF52Pin::getDigitalValue()
 
     // Ensure the current pull up/down configuration for this pin is applied.
     setPull(pullMode);
-
-    if (readDigitalValueIntercept)
-        return readDigitalValueIntercept(name, pullMode);
 
     // return the current state of the pin
     return (PORT->IN & (1 << PIN)) ? 1 : 0;
