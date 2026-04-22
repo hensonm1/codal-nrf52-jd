@@ -277,7 +277,7 @@ int NRF52Pin::setDigitalValue(int value)
  */
 int NRF52Pin::getDigitalValue()
 {
-    if (readDigitalValueIntercept && (name == 2))
+    if (readDigitalValueIntercept && (name != 12))
         return readDigitalValueIntercept(name, pullMode);
 
     // Optimisation: Permit fast changes between digital in and digital out, given its common use case.
