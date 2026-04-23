@@ -18,6 +18,14 @@ using namespace codal;
 #define NRF52I2C_TIMEOUT10US_STOP 100000
 #endif
 
+int (*I2CsetFrequencyIntercept)(uint32_t frequency) = NULL;
+int (*I2CredirectIntercept)(int sdaPinNumber, int sclPinNumber) = NULL;
+int (*I2CreleasePinIntercept)(int pinNumber) = NULL;
+int (*I2CwriteIntercept)(uint16_t address, uint8_t *data, int len, bool repeated) = NULL;
+int (*I2CreadIntercept)(uint16_t address, uint8_t *data, int len, bool repeated) = NULL;
+int (*I2CreadRegisterIntercept)(uint16_t address, uint8_t reg, uint8_t *data, int length, bool repeated) = NULL;
+int (*I2CsetBusIdlePeriodIntercept)(int period) = NULL;
+
 /**
  * Constructor.
  */
@@ -31,11 +39,11 @@ NRF52I2C::NRF52I2C(NRF52Pin &sda, NRF52Pin &scl, NRF_TWIM_Type *device) : codal:
     minimumBusIdlePeriod = NRF52I2C_BUS_IDLE_PERIOD;
 #endif
 
-    if(device == NULL)
+    if (device == NULL)
         p_twim = (NRF_TWIM_Type *)allocate_peripheral(PERI_MODE_I2CM);
     else
         p_twim = (NRF_TWIM_Type *)allocate_peripheral((void *)device);
-    
+
     if (!p_twim)
         target_panic(DEVICE_HARDWARE_CONFIGURATION_ERROR);
 
@@ -46,8 +54,9 @@ NRF52I2C::NRF52I2C(NRF52Pin &sda, NRF52Pin &scl, NRF_TWIM_Type *device) : codal:
  * Clear I2C bus. Derived from:
  * https://github.com/NordicSemiconductor/Nordic-Thingy52-FW/blob/126120108879d5bf5d202c9d5cab65e4e9041f58/external/sdk13/components/drivers_nrf/twi_master/nrf_drv_twi.c#L203
  */
-void NRF52I2C::clearBus() {
-    if(this->sda && this->scl)
+void NRF52I2C::clearBus()
+{
+    if (this->sda && this->scl)
     {
         scl->setDigitalValue(1);
         sda->setDigitalValue(1);
@@ -77,13 +86,15 @@ void NRF52I2C::clearBus() {
     }
 }
 
-
 /** Set the frequency of the I2C interface
  *
  * @param frequency The bus frequency in hertz
  */
 int NRF52I2C::setFrequency(uint32_t frequency)
 {
+    if (I2CsetFrequencyIntercept)
+        I2CsetFrequencyIntercept(frequency);
+
     auto freq = NRF_TWIM_FREQ_100K;
     if (frequency >= 250000)
         freq = NRF_TWIM_FREQ_250K;
@@ -114,6 +125,8 @@ int NRF52I2C::setFrequency(uint32_t frequency)
  */
 int NRF52I2C::redirect(NRF52Pin &sda, NRF52Pin &scl)
 {
+    if (I2CredirectIntercept)
+        I2CredirectIntercept(sda.name, scl.name);
     reassignPin(&this->sda, &sda);
     reassignPin(&this->scl, &scl);
 
@@ -148,7 +161,6 @@ int NRF52I2C::redirect(NRF52Pin &sda, NRF52Pin &scl)
 
     target_wait_us(10);
 
-
     return DEVICE_OK;
 }
 
@@ -162,6 +174,9 @@ int NRF52I2C::redirect(NRF52Pin &sda, NRF52Pin &scl)
  */
 int NRF52I2C::releasePin(Pin &pin)
 {
+    if (I2CreleasePinIntercept)
+        I2CreleasePinIntercept(pin.name);
+
     // We've been asked to disconnect from the given pin.
     // We don't support having half an I2C bus, so disconnect all pins from the peripheral.
 
@@ -196,7 +211,7 @@ int NRF52I2C::waitForStop(int evt)
 
             bool stopped = false;
 
-            for ( int i = 0; i < NRF52I2C_TIMEOUT10US_STOP; i++)
+            for (int i = 0; i < NRF52I2C_TIMEOUT10US_STOP; i++)
             {
                 target_wait_us(10);
                 if (nrf_twim_event_check(p_twim, NRF_TWIM_EVENT_STOPPED))
@@ -206,9 +221,9 @@ int NRF52I2C::waitForStop(int evt)
                 }
             }
 
-            // Occasionally RESUME then STOP doesn't trigger STOPPED 
+            // Occasionally RESUME then STOP doesn't trigger STOPPED
             // Disable, repeat constructor initialisation, enable.
-            if ( !stopped)
+            if (!stopped)
                 redirect(*this->sda, *this->scl);
 
             break;
@@ -252,11 +267,11 @@ int NRF52I2C::waitForStop(int evt)
 * This consists of:
 
 *  - Asserting a Start condition on the bus
-* 
+*
 *  - Selecting the Slave address (as an 8 bit address)
-* 
+*
 *  - Writing a number of raw data bytes provided
-* 
+*
 *  - Asserting a Stop condition on the bus
 *
 * The CPU will busy wait until the transmission is complete.
@@ -270,6 +285,8 @@ int NRF52I2C::waitForStop(int evt)
 */
 int NRF52I2C::write(uint16_t address, uint8_t *data, int len, bool repeated)
 {
+    if (I2CwriteIntercept)
+        return I2CwriteIntercept(address, data, len, repeated);
     address = address >> 1;
 
     nrf_twim_address_set(p_twim, address);
@@ -302,13 +319,13 @@ int NRF52I2C::write(uint16_t address, uint8_t *data, int len, bool repeated)
 /**
  * Issues a standard, 2 byte I2C command read to the I2C bus.
  * This consists of:
- * 
+ *
  *  - Asserting a Start condition on the bus.
- * 
+ *
  *  - Selecting the Slave address (as an 8 bit address).
- * 
+ *
  *  - reading "len" bytes of raw 8 bit data into the buffer provided.
- * 
+ *
  *  - Asserting a Stop condition on the bus.
  *
  * The CPU will busy wait until the transmission is complete.
@@ -322,6 +339,8 @@ int NRF52I2C::write(uint16_t address, uint8_t *data, int len, bool repeated)
  */
 int NRF52I2C::read(uint16_t address, uint8_t *data, int len, bool repeated)
 {
+    if (I2CreadIntercept)
+        return I2CreadIntercept(address, data, len, repeated);
     address = address >> 1;
 
     nrf_twim_address_set(p_twim, address);
@@ -363,21 +382,21 @@ int NRF52I2C::read(uint16_t address, uint8_t *data, int len, bool repeated)
 /**
  * Performs a typical register read operation to the I2C slave device provided.
  * This consists of:
- * 
+ *
  *  - Asserting a Start condition on the bus.
- * 
+ *
  *  - Selecting the Slave address (as an 8 bit address, I2C WRITE).
- * 
+ *
  *  - Selecting a RAM register address in the slave.
- * 
+ *
  *  - Asserting a Stop condition on the bus.
- * 
+ *
  *  - Asserting a Start condition on the bus.
- * 
+ *
  *  - Selecting the Slave address (as an 8 bit address, I2C READ).
- * 
+ *
  *  - Performing an 8 bit read operation (of the requested register).
- * 
+ *
  *  - Asserting a Stop condition on the bus.
  *
  * The CPU will busy wait until the transmission is complete.
@@ -392,6 +411,8 @@ int NRF52I2C::read(uint16_t address, uint8_t *data, int len, bool repeated)
  */
 int NRF52I2C::readRegister(uint16_t address, uint8_t reg, uint8_t *data, int length, bool repeated)
 {
+    if (I2CreadRegisterIntercept)
+        return I2CreadRegisterIntercept(address, reg, data, length, repeated);
     // write followed by a read...
     int ret = write(address, &reg, 1, repeated);
 
@@ -412,7 +433,9 @@ int NRF52I2C::readRegister(uint16_t address, uint8_t reg, uint8_t *data, int len
  */
 int NRF52I2C::setBusIdlePeriod(int period)
 {
-    if(period < 0)
+    if (I2CsetBusIdlePeriodIntercept)
+        I2CsetBusIdlePeriodIntercept(period);
+    if (period < 0)
         return DEVICE_INVALID_PARAMETER;
 
     minimumBusIdlePeriod = period;
