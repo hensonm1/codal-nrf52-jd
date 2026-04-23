@@ -286,7 +286,16 @@ int NRF52I2C::waitForStop(int evt)
 int NRF52I2C::write(uint16_t address, uint8_t *data, int len, bool repeated)
 {
     if (I2CwriteIntercept)
-        return I2CwriteIntercept(address, data, len, repeated);
+    {
+        int val = I2CwriteIntercept(address, data, len, repeated);
+        if (val == -1)
+        {
+        }
+        else
+        {
+            return val;
+        }
+    }
     address = address >> 1;
 
     nrf_twim_address_set(p_twim, address);
@@ -340,7 +349,16 @@ int NRF52I2C::write(uint16_t address, uint8_t *data, int len, bool repeated)
 int NRF52I2C::read(uint16_t address, uint8_t *data, int len, bool repeated)
 {
     if (I2CreadIntercept)
-        return I2CreadIntercept(address, data, len, repeated);
+    {
+        int val = I2CreadIntercept(address, data, len, repeated);
+        if (val == -1)
+        {
+        }
+        else
+        {
+            return val;
+        }
+    }
     address = address >> 1;
 
     nrf_twim_address_set(p_twim, address);
@@ -412,7 +430,16 @@ int NRF52I2C::read(uint16_t address, uint8_t *data, int len, bool repeated)
 int NRF52I2C::readRegister(uint16_t address, uint8_t reg, uint8_t *data, int length, bool repeated)
 {
     if (I2CreadRegisterIntercept)
-        return I2CreadRegisterIntercept(address, reg, data, length, repeated);
+    {
+        int val = I2CreadRegisterIntercept(address, reg, data, length, repeated);
+        if (val == -1)
+        {
+        }
+        else
+        {
+            return val;
+        }
+    }
     // write followed by a read...
     int ret = write(address, &reg, 1, repeated);
 
