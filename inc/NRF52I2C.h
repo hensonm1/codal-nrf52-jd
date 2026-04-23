@@ -35,9 +35,9 @@ extern "C"
   extern int (*I2CsetFrequencyIntercept)(uint32_t frequency);
   extern int (*I2CredirectIntercept)(int sdaPinNumber, int sclPinNumber);
   extern int (*I2CreleasePinIntercept)(int pinNumber);
-  extern int (*I2CwriteIntercept)(uint16_t address, uint8_t *data, int len, bool repeated);
-  extern int (*I2CreadIntercept)(uint16_t address, uint8_t *data, int len, bool repeated);
-  extern int (*I2CreadRegisterIntercept)(uint16_t address, uint8_t reg, uint8_t *data, int length, bool repeated);
+  extern int (*I2CwriteIntercept)(int sdaPin, int sclPin, uint16_t address, uint8_t *data, int len, bool repeated);
+  extern int (*I2CreadIntercept)(int sdaPin, int sclPin, uint16_t address, uint8_t *data, int len, bool repeated);
+  extern int (*I2CreadRegisterIntercept)(int sdaPin, int sclPin, uint16_t address, uint8_t reg, uint8_t *data, int length, bool repeated);
   extern int (*I2CsetBusIdlePeriodIntercept)(int period);
 }
 

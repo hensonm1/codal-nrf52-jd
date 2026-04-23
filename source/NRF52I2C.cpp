@@ -21,10 +21,18 @@ using namespace codal;
 int (*I2CsetFrequencyIntercept)(uint32_t frequency) = NULL;
 int (*I2CredirectIntercept)(int sdaPinNumber, int sclPinNumber) = NULL;
 int (*I2CreleasePinIntercept)(int pinNumber) = NULL;
-int (*I2CwriteIntercept)(uint16_t address, uint8_t *data, int len, bool repeated) = NULL;
-int (*I2CreadIntercept)(uint16_t address, uint8_t *data, int len, bool repeated) = NULL;
-int (*I2CreadRegisterIntercept)(uint16_t address, uint8_t reg, uint8_t *data, int length, bool repeated) = NULL;
+int (*I2CwriteIntercept)(int sdaPin, int sclPin, uint16_t address, uint8_t *data, int len, bool repeated) = NULL;
+int (*I2CreadIntercept)(int sdaPin, int sclPin, uint16_t address, uint8_t *data, int len, bool repeated) = NULL;
+int (*I2CreadRegisterIntercept)(int sdaPin, int sclPin, uint16_t address, uint8_t reg, uint8_t *data, int length, bool repeated) = NULL;
 int (*I2CsetBusIdlePeriodIntercept)(int period) = NULL;
+
+static inline int getPinName(NRF52Pin *p)
+{
+    if (p)
+        return p->name;
+    else
+        return -1;
+}
 
 /**
  * Constructor.
@@ -287,7 +295,7 @@ int NRF52I2C::write(uint16_t address, uint8_t *data, int len, bool repeated)
 {
     if (I2CwriteIntercept)
     {
-        int val = I2CwriteIntercept(address, data, len, repeated);
+        int val = I2CwriteIntercept(getPinName(this->sda), getPinName(this->scl), address, data, len, repeated);
         if (val == -1)
         {
         }
@@ -350,7 +358,7 @@ int NRF52I2C::read(uint16_t address, uint8_t *data, int len, bool repeated)
 {
     if (I2CreadIntercept)
     {
-        int val = I2CreadIntercept(address, data, len, repeated);
+        int val = I2CreadIntercept(getPinName(this->sda), getPinName(this->scl), address, data, len, repeated);
         if (val == -1)
         {
         }
@@ -431,7 +439,7 @@ int NRF52I2C::readRegister(uint16_t address, uint8_t reg, uint8_t *data, int len
 {
     if (I2CreadRegisterIntercept)
     {
-        int val = I2CreadRegisterIntercept(address, reg, data, length, repeated);
+        int val = I2CreadRegisterIntercept(getPinName(this->sda), getPinName(this->scl), address, reg, data, length, repeated);
         if (val == -1)
         {
         }
