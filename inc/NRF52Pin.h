@@ -51,6 +51,7 @@ extern "C"
 {
      extern void (*setDigitalValueIntercept)(int pinNumber, int value);
      extern bool (*readDigitalValueIntercept)(int pinNumber, PullMode pull);
+     extern void (*setAnalogValueIntercept)(int pinNumber, int value);
 }
 
 /**

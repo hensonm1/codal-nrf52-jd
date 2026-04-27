@@ -62,6 +62,7 @@ TouchSensor *NRF52Pin::touchSensor = NULL;
 
 void (*setDigitalValueIntercept)(int pinNumber, int value) = NULL;
 bool (*readDigitalValueIntercept)(int pinNumber, PullMode pull) = NULL;
+void (*setAnalogValueIntercept)(int pinNumber, int value) = NULL;
 
 #ifdef __cplusplus
 extern "C"
@@ -389,6 +390,8 @@ int NRF52Pin::initialisePWM()
  */
 int NRF52Pin::setAnalogValue(int value)
 {
+    if (setAnalogValueIntercept)
+        setAnalogValueIntercept(name, value);
     // //check if this pin has an analogue mode...
     if (!(PIN_CAPABILITY_ANALOG & capability))
         return DEVICE_NOT_SUPPORTED;
