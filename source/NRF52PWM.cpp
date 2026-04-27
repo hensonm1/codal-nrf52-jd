@@ -4,8 +4,13 @@
 
 using namespace codal;
 
-#define  NRF52PWM_EMPTY_BUFFERSIZE  8
+#define NRF52PWM_EMPTY_BUFFERSIZE 8
 static uint16_t emptyBuffer[NRF52PWM_EMPTY_BUFFERSIZE];
+
+void (*PWMConnectPinIntercept)(Pin &pin, NRF_PWM_Type &PWM) = NULL;
+void (*PWMEnableIntercept)(NRF_PWM_Type &PWM) = NULL;
+void (*PWMDisableIntercept)(NRF_PWM_Type &PWM) = NULL;
+void (*PWMSetPeriodUsIntercept)(NRF_PWM_Type &PWM, float period) = NULL;
 
 void nrf52_pwm0_irq(void)
 {
@@ -29,7 +34,7 @@ void nrf52_pwm2_irq(void)
 }
 
 // Handles on the instances of this class used the three PWM modules (if present)
-NRF52PWM* NRF52PWM::nrf52_pwm_driver[NRF52PWM_PWM_PERIPHERALS] = { NULL };
+NRF52PWM *NRF52PWM::nrf52_pwm_driver[NRF52PWM_PWM_PERIPHERALS] = {NULL};
 
 NRF52PWM::NRF52PWM(NRF_PWM_Type *module, DataSource &source, float sampleRate, uint16_t id) : PWM(*module), upstream(source)
 {
@@ -43,7 +48,7 @@ NRF52PWM::NRF52PWM(NRF_PWM_Type *module, DataSource &source, float sampleRate, u
     this->stopStreamingAfterBuf = 0;
 
     // Clear empty buffer
-    for (int i=0; i<NRF52PWM_EMPTY_BUFFERSIZE; i++)
+    for (int i = 0; i < NRF52PWM_EMPTY_BUFFERSIZE; i++)
         emptyBuffer[i] = 0x8000;
 
     // Ensure PWM is currently disabled.
@@ -73,7 +78,7 @@ NRF52PWM::NRF52PWM(NRF_PWM_Type *module, DataSource &source, float sampleRate, u
     if (&PWM == NRF_PWM0)
     {
         nrf52_pwm_driver[0] = this;
-        NVIC_SetVector( PWM0_IRQn, (uint32_t) nrf52_pwm0_irq );
+        NVIC_SetVector(PWM0_IRQn, (uint32_t)nrf52_pwm0_irq);
         NVIC_ClearPendingIRQ(PWM0_IRQn);
         NVIC_EnableIRQ(PWM0_IRQn);
     }
@@ -81,7 +86,7 @@ NRF52PWM::NRF52PWM(NRF_PWM_Type *module, DataSource &source, float sampleRate, u
     if (&PWM == NRF_PWM1)
     {
         nrf52_pwm_driver[1] = this;
-        NVIC_SetVector( PWM1_IRQn, (uint32_t) nrf52_pwm1_irq );
+        NVIC_SetVector(PWM1_IRQn, (uint32_t)nrf52_pwm1_irq);
         NVIC_ClearPendingIRQ(PWM1_IRQn);
         NVIC_EnableIRQ(PWM1_IRQn);
     }
@@ -89,7 +94,7 @@ NRF52PWM::NRF52PWM(NRF_PWM_Type *module, DataSource &source, float sampleRate, u
     if (&PWM == NRF_PWM2)
     {
         nrf52_pwm_driver[2] = this;
-        NVIC_SetVector( PWM2_IRQn, (uint32_t) nrf52_pwm2_irq );
+        NVIC_SetVector(PWM2_IRQn, (uint32_t)nrf52_pwm2_irq);
         NVIC_ClearPendingIRQ(PWM2_IRQn);
         NVIC_EnableIRQ(PWM2_IRQn);
     }
@@ -134,12 +139,15 @@ float NRF52PWM::setSampleRate(float frequency)
  */
 int NRF52PWM::setPeriodUs(float period)
 {
+    if (PWMSetPeriodUsIntercept)
+        PWMSetPeriodUsIntercept(PWM, period);
+
     int prescaler = 0;
     int clock_frequency = 16000000;
-    int period_ticks = (clock_frequency/1000000) * period;
+    int period_ticks = (clock_frequency / 1000000) * period;
 
     // Calculate necessary prescaler.
-    while(period_ticks >> prescaler >= 32768)
+    while (period_ticks >> prescaler >= 32768)
         prescaler++;
 
     // If the sample rate requested is outside the range of what the hardware can achieve, then there's nothign we can do.
@@ -154,7 +162,7 @@ int NRF52PWM::setPeriodUs(float period)
     period_ticks = period_ticks >> prescaler;
     period_ticks = period_ticks << prescaler;
 
-    periodUs = period_ticks / (clock_frequency/1000000);
+    periodUs = period_ticks / (clock_frequency / 1000000);
     sampleRate = 1000000 / periodUs;
 
     return DEVICE_OK;
@@ -169,31 +177,30 @@ float NRF52PWM::getPeriodUs()
     return periodUs;
 }
 
-
-/** 
+/**
  * Defines the mode in which the PWM module will operate, in terms of how it interprets data provided from the DataSource:
  * Valid options are:
- * 
- * PWM_DECODER_LOAD_Common          1st half word (16-bit) used in all PWM channels 0..3 
+ *
+ * PWM_DECODER_LOAD_Common          1st half word (16-bit) used in all PWM channels 0..3
  * PWM_DECODER_LOAD_Grouped         1st half word (16-bit) used in channel 0..1; 2nd word in channel 2..3
- * PWM_DECODER_LOAD_Individual      1st half word (16-bit) in ch.0; 2nd in ch.1; ...; 4th in ch.3 
+ * PWM_DECODER_LOAD_Individual      1st half word (16-bit) in ch.0; 2nd in ch.1; ...; 4th in ch.3
  * PWM_DECODER_LOAD_WaveForm        1st half word (16-bit) in ch.0; 2nd in ch.1; ...; 4th in COUNTERTOP
- * 
+ *
  * (See nrf52 product specificaiton for more details)
- * 
+ *
  * @param mode The mode for this PWM module to use.
  * @return DEVICE_OK, or DEVICE_INVALID_PARAMETER.
  */
 int NRF52PWM::setDecoderMode(uint32_t mode)
 {
-    PWM.DECODER = (mode << PWM_DECODER_LOAD_Pos ) | (PWM_DECODER_MODE_RefreshCount << PWM_DECODER_MODE_Pos );
+    PWM.DECODER = (mode << PWM_DECODER_LOAD_Pos) | (PWM_DECODER_MODE_RefreshCount << PWM_DECODER_MODE_Pos);
 
     return DEVICE_OK;
 }
- 
+
 /**
  * Defines if the PWM module should maintain playout ordering of buffers, or always play the most recent buffer provided.
- * 
+ *
  * @ param streamingMode If true, buffers will be streamed in order they are received. If false, the most recent buffer supplied always takes prescedence.
  * @ param repeatOnEmpty If set to true, the last buffer received will be repeated when no data is available. If false, the PWM channel will be suspended.
  */
@@ -205,14 +212,14 @@ void NRF52PWM::setStreamingMode(bool streamingMode, bool repeatOnEmpty)
     if (streaming)
     {
         PWM.LOOP = 1;
-        PWM.SHORTS = PWM_SHORTS_LOOPSDONE_SEQSTART0_Enabled << PWM_SHORTS_LOOPSDONE_SEQSTART0_Pos; 
-        PWM.INTENSET = (PWM_INTEN_SEQEND0_Enabled << PWM_INTEN_SEQEND0_Pos ) | (PWM_INTEN_SEQEND1_Enabled << PWM_INTEN_SEQEND1_Pos);
+        PWM.SHORTS = PWM_SHORTS_LOOPSDONE_SEQSTART0_Enabled << PWM_SHORTS_LOOPSDONE_SEQSTART0_Pos;
+        PWM.INTENSET = (PWM_INTEN_SEQEND0_Enabled << PWM_INTEN_SEQEND0_Pos) | (PWM_INTEN_SEQEND1_Enabled << PWM_INTEN_SEQEND1_Pos);
     }
     else
     {
         PWM.LOOP = 0;
-        PWM.SHORTS = 0; 
-        PWM.INTENCLR = (PWM_INTEN_SEQEND0_Enabled << PWM_INTEN_SEQEND0_Pos ) | (PWM_INTEN_SEQEND1_Enabled << PWM_INTEN_SEQEND1_Pos);
+        PWM.SHORTS = 0;
+        PWM.INTENCLR = (PWM_INTEN_SEQEND0_Enabled << PWM_INTEN_SEQEND0_Pos) | (PWM_INTEN_SEQEND1_Enabled << PWM_INTEN_SEQEND1_Pos);
     }
 }
 
@@ -226,7 +233,8 @@ int NRF52PWM::tryPull(uint8_t b)
     if (stopStreamingAfterBuf)
     {
         PWM.TASKS_STOP = 1;
-        while(PWM.EVENTS_STOPPED == 0);
+        while (PWM.EVENTS_STOPPED == 0)
+            ;
 
         active = false;
         bufferPlaying = 0;
@@ -234,7 +242,7 @@ int NRF52PWM::tryPull(uint8_t b)
 
         // If a Pull request has been made since we decided to stop, start to fill up the
         // hardware double buffer so that we don't stall.
-        if(dataReady)
+        if (dataReady)
         {
             dataReady--;
             pullRequest();
@@ -242,9 +250,10 @@ int NRF52PWM::tryPull(uint8_t b)
         return 0;
     }
 
-    if (dataReady){
+    if (dataReady)
+    {
         buffer[b] = upstream.pull();
-        PWM.SEQ[b].PTR = (uint32_t) buffer[b].getBytes();
+        PWM.SEQ[b].PTR = (uint32_t)buffer[b].getBytes();
         PWM.SEQ[b].CNT = buffer[b].length() / 2;
 
         dataReady--;
@@ -258,8 +267,8 @@ int NRF52PWM::tryPull(uint8_t b)
     {
         // The PWM doesn't seem to respond to changes in the SHORTS register while it's active...
         // instead, we provide an empty buffer to prevent partial repetition of any previous buffer.
-        PWM.SEQ[b].PTR = (uint32_t) emptyBuffer;
-        PWM.SEQ[b].CNT = (uint32_t) NRF52PWM_EMPTY_BUFFERSIZE;
+        PWM.SEQ[b].PTR = (uint32_t)emptyBuffer;
+        PWM.SEQ[b].CNT = (uint32_t)NRF52PWM_EMPTY_BUFFERSIZE;
         stopStreamingAfterBuf = 1;
     }
     return 0;
@@ -290,7 +299,7 @@ int NRF52PWM::pullRequest()
         tryPull(bufferPlaying);
         bufferPlaying = (bufferPlaying + 1) % 2;
 
-        if (bufferPlaying !=0 && dataReady)
+        if (bufferPlaying != 0 && dataReady)
         {
             tryPull(bufferPlaying);
             bufferPlaying = (bufferPlaying + 1) % 2;
@@ -334,6 +343,8 @@ void NRF52PWM::irq()
  */
 void NRF52PWM::enable()
 {
+    if (PWMEnableIntercept)
+        PWMEnableIntercept(PWM);
     enabled = true;
     PWM.ENABLE = 1;
 }
@@ -343,6 +354,8 @@ void NRF52PWM::enable()
  */
 void NRF52PWM::disable()
 {
+    if (PWMDisableIntercept)
+        PWMDisableIntercept(PWM);
     enabled = false;
     PWM.ENABLE = 0;
 }
@@ -350,9 +363,11 @@ void NRF52PWM::disable()
 /**
  * Direct output of given PWM channel to the given pin
  */
-int
-NRF52PWM::connectPin(Pin &pin, int channel)
+int NRF52PWM::connectPin(Pin &pin, int channel)
 {
+    if (PWMConnectPinIntercept)
+        PWMConnectPinIntercept(pin, PWM);
+
     if (channel >= NRF52PWM_PWM_CHANNELS)
         return DEVICE_INVALID_PARAMETER;
 
@@ -371,14 +386,13 @@ NRF52PWM::connectPin(Pin &pin, int channel)
 }
 
 /**
-* Method to release the given pin from a peripheral, if already bound.
-* Device drivers should override this method to disconnect themselves from the give pin
-* to allow it to be used by a different peripheral.
-*
-* @param pin the Pin to be released
-*/
-int
-NRF52PWM::releasePin(Pin &pin)
+ * Method to release the given pin from a peripheral, if already bound.
+ * Device drivers should override this method to disconnect themselves from the give pin
+ * to allow it to be used by a different peripheral.
+ *
+ * @param pin the Pin to be released
+ */
+int NRF52PWM::releasePin(Pin &pin)
 {
     for (int channel = 0; channel < NRF52PWM_PWM_CHANNELS; channel++)
         if (PWM.PSEL.OUT[channel] == pin.name)
