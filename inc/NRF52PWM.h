@@ -17,7 +17,7 @@
 
 extern "C"
 {
-    extern void (*PWMConnectPinIntercept)(Pin &pin, NRF_PWM_Type &PWM);
+    extern void (*PWMConnectPinIntercept)(codal::Pin &pin, NRF_PWM_Type &PWM);
     extern void (*PWMEnableIntercept)(NRF_PWM_Type &PWM);
     extern void (*PWMDisableIntercept)(NRF_PWM_Type &PWM);
     extern void (*PWMSetPeriodUsIntercept)(NRF_PWM_Type &PWM, float period);
