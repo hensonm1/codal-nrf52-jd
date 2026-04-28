@@ -14,7 +14,7 @@
 
 extern "C"
 {
-  extern void (*SerialConfigurePinsIntercept)(Pin &tx, Pin &rx);
+  extern void (*SerialConfigurePinsIntercept)(codal::Pin &tx, codal::Pin &rx);
   extern void (*SerialSetBaudrateIntercept)(uint32_t baudrate);
   extern void (*SerialPutCIntercept)(char c);
 }
