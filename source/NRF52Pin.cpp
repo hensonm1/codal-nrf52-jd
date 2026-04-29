@@ -63,6 +63,7 @@ TouchSensor *NRF52Pin::touchSensor = NULL;
 void (*setDigitalValueIntercept)(int pinNumber, int value) = NULL;
 bool (*readDigitalValueIntercept)(int pinNumber, PullMode pull) = NULL;
 void (*setAnalogValueIntercept)(int pinNumber, int value) = NULL;
+bool (*readAnalogValueIntercept)(int pinNumber) = NULL;
 
 #ifdef __cplusplus
 extern "C"
@@ -488,7 +489,8 @@ int NRF52Pin::setServoValue(int value, int range, int center)
  */
 int NRF52Pin::getAnalogValue()
 {
-
+    if (readAnalogValueIntercept)
+        return readAnalogValueIntercept(name);
     // //check if this pin has an analogue mode...
     if (!(PIN_CAPABILITY_ANALOG & capability))
         return DEVICE_NOT_SUPPORTED;
