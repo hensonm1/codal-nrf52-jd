@@ -63,7 +63,7 @@ TouchSensor *NRF52Pin::touchSensor = NULL;
 void (*setDigitalValueIntercept)(int pinNumber, int value) = NULL;
 bool (*readDigitalValueIntercept)(int pinNumber, PullMode pull) = NULL;
 void (*setAnalogValueIntercept)(int pinNumber, int value) = NULL;
-bool (*readAnalogValueIntercept)(int pinNumber) = NULL;
+int (*readAnalogValueIntercept)(int pinNumber) = NULL;
 
 #ifdef __cplusplus
 extern "C"
