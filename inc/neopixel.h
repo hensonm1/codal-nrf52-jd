@@ -14,7 +14,7 @@
 
 extern "C"
 {
-    void (*NeopixelSendBufferIntercept)(codal::Pin &pin, ManagedBuffer buffer);
+    extern void (*NeopixelSendBufferIntercept)(codal::Pin &pin, ManagedBuffer buffer);
 }
 
 namespace codal
