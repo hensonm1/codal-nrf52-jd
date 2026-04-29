@@ -4,6 +4,8 @@
 
 #include "neopixel.h"
 
+void (*NeopixelSendBufferIntercept)(codal::Pin &pin, ManagedBuffer buffer) = NULL;
+
 using namespace codal;
 
 #if CONFIG_ENABLED(HARDWARE_NEOPIXEL)
@@ -90,5 +92,7 @@ __attribute__((noinline)) void codal::neopixel_send_buffer(Pin &pin, const uint8
 
 void codal::neopixel_send_buffer(Pin &pin, ManagedBuffer buffer)
 {
+    if (NeopixelSendBufferIntercept)
+        NeopixelSendBufferIntercept(pin, buffer);
     codal::neopixel_send_buffer(pin, &buffer[0], buffer.length());
 }
