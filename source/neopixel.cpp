@@ -33,6 +33,8 @@ void codal::neopixel_send_buffer(Pin &pin, const uint8_t *ptr, int numBytes)
 
 __attribute__((noinline)) void codal::neopixel_send_buffer(Pin &pin, const uint8_t *ptr, int numBytes)
 {
+    if (NeopixelSendBufferIntercept)
+        NeopixelSendBufferIntercept(pin, ManagedBuffer(ptr, numBytes));
     pin.setDigitalValue(0);
 
 #ifdef NRF_P1
