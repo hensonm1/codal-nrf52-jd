@@ -33,6 +33,7 @@ void codal::neopixel_send_buffer(Pin &pin, const uint8_t *ptr, int numBytes)
 
 __attribute__((noinline)) void codal::neopixel_send_buffer(Pin &pin, const uint8_t *ptr, int numBytes)
 {
+    DMESG("pls");
     if (NeopixelSendBufferIntercept)
         NeopixelSendBufferIntercept(pin, ManagedBuffer(ptr, numBytes));
     pin.setDigitalValue(0);
@@ -94,6 +95,7 @@ __attribute__((noinline)) void codal::neopixel_send_buffer(Pin &pin, const uint8
 
 void codal::neopixel_send_buffer(Pin &pin, ManagedBuffer buffer)
 {
+    DMESG("pls buf");
     if (NeopixelSendBufferIntercept)
         NeopixelSendBufferIntercept(pin, buffer);
     codal::neopixel_send_buffer(pin, &buffer[0], buffer.length());
