@@ -584,7 +584,7 @@ int NRF52Pin::isAnalog()
  */
 int NRF52Pin::isTouched()
 {
-    return 1;
+    return 0;
     // Maintain the last type of sensing used.
     return isTouched(status & IO_STATUS_CAPACITATIVE_TOUCH ? TouchMode::Capacitative : TouchMode::Resistive);
 }
