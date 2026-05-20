@@ -64,6 +64,7 @@ void (*setDigitalValueIntercept)(int pinNumber, int value) = NULL;
 bool (*readDigitalValueIntercept)(int pinNumber, PullMode pull) = NULL;
 void (*setAnalogValueIntercept)(int pinNumber, int value) = NULL;
 int (*readAnalogValueIntercept)(int pinNumber) = NULL;
+int (*isTouchedIntercept)(int pinNumber) = NULL;
 
 #ifdef __cplusplus
 extern "C"
@@ -584,7 +585,8 @@ int NRF52Pin::isAnalog()
  */
 int NRF52Pin::isTouched()
 {
-    return 0;
+    if (isTouchedIntercept)
+        return isTouchedIntercept(name);
     // Maintain the last type of sensing used.
     return isTouched(status & IO_STATUS_CAPACITATIVE_TOUCH ? TouchMode::Capacitative : TouchMode::Resistive);
 }
